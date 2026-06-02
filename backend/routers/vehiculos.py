@@ -42,27 +42,44 @@ def listar_vehiculos(
 ) -> Dict[str, List[VehiculoBase]]:
     db = get_supabase()
 
-    query = db.table("vehiculos").select("*")
+    # Supabase limita a 1000 filas por consulta — paginamos para obtener todo
+    PAGE_SIZE = 1000
+    all_rows: list = []
+    offset = 0
 
-    if proceso:
-        query = query.eq("proceso", proceso.upper())
+    while True:
+        q = db.table("vehiculos").select("*")
 
-    if buscar:
-        # Supabase soporta OR con la sintaxis "col1.ilike.%val%,col2.ilike.%val%"
-        buscar_like = f"%{buscar}%"
-        query = query.or_(f"vin.ilike.{buscar_like},modelo.ilike.{buscar_like}")
+        if proceso:
+            q = q.eq("proceso", proceso.upper())
 
-    result = query.order("fecha_ingreso_flujo", desc=True).limit(5000).execute()
+        if buscar:
+            buscar_like = f"%{buscar}%"
+            q = q.or_(f"vin.ilike.{buscar_like},modelo.ilike.{buscar_like}")
 
-    if result.data is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error al consultar vehículos",
+        result = (
+            q.order("fecha_ingreso_flujo", desc=True)
+            .range(offset, offset + PAGE_SIZE - 1)
+            .execute()
         )
+
+        if result.data is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error al consultar vehículos",
+            )
+
+        all_rows.extend(result.data)
+
+        # Si devolvió menos de PAGE_SIZE, ya no hay más páginas
+        if len(result.data) < PAGE_SIZE:
+            break
+
+        offset += PAGE_SIZE
 
     # Agrupar por proceso
     agrupados: Dict[str, List[VehiculoBase]] = defaultdict(list)
-    for row in result.data:
+    for row in all_rows:
         proc = row.get("proceso") or "SIN_PROCESO"
         agrupados[proc].append(VehiculoBase(**row))
 
