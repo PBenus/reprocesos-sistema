@@ -1,0 +1,142 @@
+---
+# ============================================================
+# docker-compose.yml — Módulo de Ingesta de Reprocesos
+# ============================================================
+# Servicios:
+#   postgres          → Metabase de Airflow (PostgreSQL 15)
+#   airflow-init      → Inicializa DB y crea usuario admin
+#   airflow-webserver → Interfaz web (puerto 8080)
+#   airflow-scheduler → Ejecutor de DAGs (LocalExecutor)
+#
+# Variables de entorno cargadas desde ../.env
+# ============================================================
+
+version: "3.9"
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - ../.env
+  environment:
+    # Airflow core
+    AIRFLOW_HOME: /opt/airflow
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: "120"
+
+    # Base de datos de Airflow (PostgreSQL local)
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+
+    # Logging
+    AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
+    AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+
+    # Webserver
+    AIRFLOW__WEBSERVER__SECRET_KEY: "reprocesos_secret_key_2025"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+
+    # Python path — permite importar tasks.* desde los DAGs
+    PYTHONPATH: /opt/airflow
+
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./tasks:/opt/airflow/tasks
+    - ./logs:/opt/airflow/logs
+    - ./downloads:/opt/airflow/downloads
+
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+  restart: unless-stopped
+
+
+services:
+
+  # ──────────────────────────────────────────────
+  # PostgreSQL — Metabase de Airflow
+  # ──────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: reprocesos_postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"   # Expuesto en 5433 para no colisionar con Postgres local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Airflow Init — inicializa DB + crea admin user
+  # ──────────────────────────────────────────────
+  airflow-init:
+    <<: *airflow-common
+    container_name: reprocesos_airflow_init
+    command: >
+      bash -c "
+        airflow db upgrade &&
+        airflow users create \
+          --username admin \
+          --password admin \
+          --firstname Admin \
+          --lastname Reprocesos \
+          --role Admin \
+          --email admin@reprocesos.local || true
+      "
+    restart: "no"
+
+  # ──────────────────────────────────────────────
+  # Airflow Webserver — UI en puerto 8080
+  # ──────────────────────────────────────────────
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: reprocesos_airflow_webserver
+    command: airflow webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ──────────────────────────────────────────────
+  # Airflow Scheduler — ejecutor de tareas
+  # ──────────────────────────────────────────────
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: reprocesos_airflow_scheduler
+    command: airflow scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+
+volumes:
+  postgres_data:
+    driver: local

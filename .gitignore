@@ -1,0 +1,69 @@
+# ============================================================
+#  .gitignore — Sistema de Control de Reprocesos
+# ============================================================
+
+# Variables de entorno y secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# Archivos de producción con URLs sensibles (túnel Cloudflare)
+frontend/.env.production
+cloudflare/cloudflared.exe
+cloudflare/tunnel.log
+cloudflare/ultima_url_tunel.txt
+
+
+# Credenciales Google
+backend/credentials/service_account.json
+ingestion/credentials/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+venv/
+env/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# Airflow
+ingestion/logs/
+ingestion/plugins/
+ingestion/airflow.db
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+
+# Reportes descargados (archivos temporales)
+ingestion/downloads/
+
+# Docker volumes
+ingestion/postgres-data/
+ingestion/airflow-data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
